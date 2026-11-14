@@ -1,0 +1,57 @@
+@import 'tailwindcss';
+
+/* ============================================================
+   Paleta institucional (tomada de Soluciones Barriales para que la
+   plataforma fusionada mantenga una sola identidad visual)
+   ============================================================ */
+
+@theme {
+  --color-navy-50: #eff3ff;
+  --color-navy-100: #dce5fd;
+  --color-navy-200: #c0d0fc;
+  --color-navy-300: #94b1f9;
+  --color-navy-400: #6188f4;
+  --color-navy-500: #3c62ee;
+  --color-navy-600: #2644e3;
+  --color-navy-700: #1e3a8a;
+  --color-navy-800: #1a327a;
+  --color-navy-900: #1b2f63;
+  --color-navy-950: #141f3d;
+
+  /* Fuente del sistema: la demo funciona sin internet (sin Google Fonts) */
+  --font-sans: 'Inter', 'Segoe UI', Roboto, ui-sans-serif, system-ui, sans-serif;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-fade-in {
+  animation: fade-in 0.3s ease-out both;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+}
+
+*:focus-visible {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background-color: #dce5fd;
+  color: #1e3a8a;
+}

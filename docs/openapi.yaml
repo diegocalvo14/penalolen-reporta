@@ -1,0 +1,512 @@
+openapi: 3.1.0
+info:
+  title: Peñalolén Reporta — API de negocio
+  version: 1.0.0 (Hitos 1–7)
+  description: |
+    API de negocio (rutas de servidor de Next.js). Contrato de PROMPT_DESARROLLO §8.1.
+    Este archivo documenta lo implementado; se amplía en cada hito.
+    Todas las respuestas de error usan el formato `{ "error": { "code", "message" } }`.
+    La sesión viaja en la cookie httpOnly `pr_session`.
+servers:
+  - url: http://localhost:3000
+
+components:
+  securitySchemes:
+    cookieSesion:
+      type: apiKey
+      in: cookie
+      name: pr_session
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, example: NO_AUTENTICADO }
+            message: { type: string, example: Debes iniciar sesión. }
+    Rol:
+      type: string
+      enum: [encargado, funcionario, admin]
+    Usuario:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        nombre: { type: string }
+        email: { type: string, format: email }
+        rol: { $ref: '#/components/schemas/Rol' }
+        unidad: { type: [string, 'null'], enum: [DOM, DIDECO, null] }
+        territorioId: { type: [integer, 'null'] }
+        territorioNombre: { type: [string, 'null'] }
+    LatLng:
+      type: object
+      properties:
+        lat: { type: number, example: -33.4815 }
+        lng: { type: number, example: -70.579 }
+    Categoria:
+      type: object
+      properties:
+        id: { type: integer }
+        nombre: { type: string, example: Bache }
+        slug: { type: string, example: bache }
+        usaIa: { type: boolean }
+        radioDuplicadoM: { type: integer, example: 15 }
+        unidadResponsable: { type: string, enum: [DOM, DIDECO] }
+        color: { type: string, example: '#dc2626' }
+        activa: { type: boolean }
+    Territorio:
+      type: object
+      properties:
+        id: { type: integer }
+        nombre: { type: string, example: La Faena }
+        centroide: { oneOf: [{ $ref: '#/components/schemas/LatLng' }, { type: 'null' }] }
+    Severidad:
+      type: string
+      enum: [baja, media, critica, sin_deteccion]
+    EstadoReporte:
+      type: string
+      enum: [ingresado, en_revision, en_gestion, derivado, resuelto, duplicado, rechazado]
+    AnalisisResumen:
+      type: [object, 'null']
+      properties:
+        estado: { type: string, enum: [pendiente, listo, error] }
+        severidad: { oneOf: [{ $ref: '#/components/schemas/Severidad' }, { type: 'null' }] }
+        requiereRevision: { type: boolean }
+    ReporteResumen:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        folio: { type: string, example: PR-2026-00042 }
+        estado: { $ref: '#/components/schemas/EstadoReporte' }
+        creadoEn: { type: string, format: date-time }
+        actualizadoEn: { type: string, format: date-time }
+        totalRespaldoVecinos: { type: integer }
+        fueraDeTerritorio: { type: boolean }
+        categoria:
+          type: object
+          properties:
+            id: { type: integer }
+            nombre: { type: string }
+            slug: { type: string }
+            color: { type: string }
+            usaIa: { type: boolean }
+        territorio:
+          type: object
+          properties:
+            id: { type: integer }
+            nombre: { type: string }
+        analisis: { $ref: '#/components/schemas/AnalisisResumen' }
+  responses:
+    NoAutenticado:
+      description: Sin sesión o sesión inválida
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+paths:
+  /api/auth/login:
+    post:
+      summary: Iniciar sesión (RF-1.1)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: Sesión iniciada; deja la cookie pr_session
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  usuario:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      nombre: { type: string }
+                      rol: { $ref: '#/components/schemas/Rol' }
+                  redirectTo: { type: string, example: /encargado }
+        '400': { description: Cuerpo no es JSON, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Credenciales inválidas (mensaje genérico), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Demasiados intentos fallidos, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/auth/logout:
+    post:
+      summary: Cerrar sesión
+      responses:
+        '200': { description: Cookie eliminada }
+    get:
+      summary: Borra la cookie y redirige al login (uso interno de las páginas)
+      parameters:
+        - { name: next, in: query, schema: { type: string } }
+      responses:
+        '307': { description: Redirección a /login }
+
+  /api/auth/me:
+    get:
+      summary: Usuario de la sesión
+      security: [{ cookieSesion: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  usuario: { $ref: '#/components/schemas/Usuario' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /api/categorias:
+    get:
+      summary: Categorías activas (todos los roles)
+      security: [{ cookieSesion: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categorias: { type: array, items: { $ref: '#/components/schemas/Categoria' } }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /api/territorios:
+    get:
+      summary: Territorios con su centroide (todos los roles)
+      security: [{ cookieSesion: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  territorios: { type: array, items: { $ref: '#/components/schemas/Territorio' } }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /api/reportes:
+    post:
+      summary: Registrar un reporte (encargado) — RF-3.1
+      security: [{ cookieSesion: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [categoriaId, descripcion, lat, lng, origen, nVecinos, canal]
+              properties:
+                categoriaId: { type: integer }
+                descripcion: { type: string, minLength: 5, maxLength: 500 }
+                lat: { type: number }
+                lng: { type: number }
+                origen: { type: string, enum: [gps, mapa, centroide] }
+                precision: { type: number, description: 'Metros. Obligatoria si origen = gps' }
+                direccionReferencia: { type: string, maxLength: 200 }
+                nVecinos: { type: integer, minimum: 1 }
+                canal: { type: string, enum: [junta, whatsapp, presencial, otro] }
+                foto:
+                  type: string
+                  format: binary
+                  description: 'JPG, PNG o WEBP, máximo 10 MB. Obligatoria si la categoría usa IA. Se guarda como JPEG sin metadatos.'
+      responses:
+        '201':
+          description: Reporte creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  folio: { type: string, example: PR-2026-00042 }
+                  estado: { type: string, example: ingresado }
+                  territorioId: { type: integer }
+                  fueraDeTerritorio: { type: boolean }
+                  totalRespaldoVecinos: { type: integer }
+                  analisis:
+                    type: [object, 'null']
+                    properties:
+                      id: { type: string, format: uuid }
+                      estado: { type: string, example: pendiente }
+        '400': { description: Datos o foto inválidos, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { description: El rol no puede crear reportes, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: El encargado no tiene territorio asignado, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: Archivo demasiado grande, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    get:
+      summary: Bandeja municipal (funcionario/admin) — RF-6.1
+      security: [{ cookieSesion: [] }]
+      parameters:
+        - { name: estado, in: query, schema: { type: string, enum: [abiertos, ingresado, en_revision, en_gestion, derivado, resuelto, duplicado, rechazado] } }
+        - { name: categoria, in: query, schema: { type: integer } }
+        - { name: territorio, in: query, schema: { type: integer } }
+        - { name: severidad, in: query, schema: { type: string, enum: [critica, media, baja, sin_deteccion, sin_analisis] } }
+        - { name: destacados, in: query, description: 'Solo fuera de territorio o que requieren revisión', schema: { type: string, enum: ['1'] } }
+        - { name: orden, in: query, schema: { type: string, enum: [recientes, respaldos, antiguedad, severidad], default: recientes } }
+        - { name: pagina, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+      responses:
+        '200':
+          description: Página de resultados (25 por página)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ReporteResumen' } }
+                  total: { type: integer }
+                  paginas: { type: integer }
+                  pagina: { type: integer }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { description: Rol sin acceso a la bandeja }
+
+  /api/reportes/mios:
+    get:
+      summary: Reportes del encargado de la sesión — RF-3.6
+      security: [{ cookieSesion: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ReporteResumen' } }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /api/reportes/{id}:
+    get:
+      summary: Detalle completo (encargado solo los suyos; si no, 404)
+      security: [{ cookieSesion: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 'Reporte con ubicación, imágenes, último análisis, respaldos y eventos del historial' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '404': { description: No existe o el usuario no puede verlo }
+
+  /api/imagenes/{id}:
+    get:
+      summary: Foto de un reporte (con control de acceso)
+      security: [{ cookieSesion: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Imagen JPEG, content: { image/jpeg: {} } }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '404': { description: No existe o el usuario no puede verla }
+
+  /api/reportes/duplicados:
+    post:
+      summary: Reportes abiertos cercanos de la misma categoría (encargado) — RF-4.1
+      security: [{ cookieSesion: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [categoriaId, lat, lng, origen]
+              properties:
+                categoriaId: { type: integer }
+                lat: { type: number }
+                lng: { type: number }
+                precision: { type: number }
+                origen: { type: string, enum: [gps, mapa, centroide] }
+      responses:
+        '200':
+          description: 'aplica=false si origen=centroide o precision > radio de la categoría'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  aplica: { type: boolean }
+                  radioM: { type: integer }
+                  cercanos:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        folio: { type: string }
+                        distanciaM: { type: number }
+                        totalRespaldoVecinos: { type: integer }
+                        descripcion: { type: string }
+                        territorio: { type: string }
+                        imagenId: { type: [string, 'null'], format: uuid }
+
+  /api/reportes/{id}/respaldos:
+    post:
+      summary: Sumar respaldo vecinal (encargado) — RF-4.3
+      security: [{ cookieSesion: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nVecinos, canal]
+              properties:
+                nVecinos: { type: integer, minimum: 1 }
+                canal: { type: string, enum: [junta, whatsapp, presencial, otro] }
+                nota: { type: string, maxLength: 300 }
+      responses:
+        '201': { description: '{ reporteId, folio, totalRespaldoVecinos }' }
+        '409': { description: Reporte cerrado, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/reportes/{id}/estado:
+    patch:
+      summary: Cambiar estado (funcionario/admin) — §6
+      security: [{ cookieSesion: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        description: 'JSON, o multipart con los mismos campos + "foto" para cerrar con evidencia'
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [estado]
+              properties:
+                estado: { type: string, enum: [en_revision, en_gestion, derivado, resuelto, duplicado, rechazado] }
+                comentario: { type: string, description: Obligatorio para resuelto }
+                organismo: { type: string, description: Obligatorio para derivado }
+                duplicadoDe: { type: string, description: 'Folio o id del original; obligatorio para duplicado' }
+                motivo: { type: string, description: Obligatorio para rechazado }
+      responses:
+        '200': { description: '{ id, folio, estadoAnterior, estado }' }
+        '400': { description: Datos faltantes, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Transición no permitida, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/reportes/{id}/comentarios:
+    post:
+      summary: Comentario del funcionario (visible en el historial) — RF-6.3
+      security: [{ cookieSesion: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [comentario], properties: { comentario: { type: string, maxLength: 1000 } } } } } }
+      responses:
+        '201': { description: OK }
+
+  /api/reportes/{id}/analisis/reintentar:
+    post:
+      summary: Reintentar / reanalizar la foto (funcionario/admin) — RF-5.1, RF-5.4
+      security: [{ cookieSesion: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200': { description: '{ analisisId, estado: listo|error, severidad, error }' }
+        '409': { description: La categoría no usa IA o no hay foto, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/reportes/mapa:
+    get:
+      summary: Puntos para el mapa (mismos filtros que la bandeja) — RF-6.2
+      security: [{ cookieSesion: [] }]
+      responses:
+        '200': { description: '{ puntos: [{ id, folio, lat, lng, estado, totalRespaldoVecinos, categoria, territorio, severidad }] }' }
+
+  /api/notificaciones:
+    get:
+      summary: Notificaciones del usuario — RF-7.1
+      security: [{ cookieSesion: [] }]
+      responses:
+        '200': { description: '{ items: [{ id, tipo, mensaje, leida, creadoEn, reporteId, folio }], noLeidas }' }
+
+  /api/notificaciones/{id}:
+    patch:
+      summary: Marcar como leída (id = "todas" marca todas)
+      security: [{ cookieSesion: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: '{ ok, cambiadas }' }
+
+  /api/metricas:
+    get:
+      summary: Métricas del trabajo (funcionario/admin) — RF-9.1
+      security: [{ cookieSesion: [] }]
+      parameters:
+        - { name: desde, in: query, schema: { type: string, format: date-time } }
+        - { name: hasta, in: query, schema: { type: string, format: date-time } }
+        - { name: territorio, in: query, schema: { type: integer } }
+        - { name: categoria, in: query, schema: { type: integer } }
+        - { name: unidad, in: query, schema: { type: string, enum: [DOM, DIDECO] } }
+      responses:
+        '200': { description: 'totales, porEstado, porCategoria, porTerritorio, abiertosPorSeveridad, tiempoPorEtapa, horasPromedioResolucion, top5Respaldos, creadosPorSemana' }
+
+  /api/copiloto:
+    post:
+      summary: Inferencia del copiloto (funcionario/admin) — contrato §8.3
+      security: [{ cookieSesion: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                messages: { type: array, items: { type: object, properties: { role: { type: string, enum: [user, assistant] }, content: { type: string } } } }
+                reporteId: { type: [string, 'null'], format: uuid }
+                incluirMetricas: { type: boolean }
+                ambitoMetricas: { type: string, enum: [todo, unidad], description: 'Agregado: "unidad" filtra a la unidad del funcionario' }
+      responses:
+        '200': { description: '{ success: true, reply, provider, model, usoMetricas, usoContexto, plazosOcultados } o { success: false, offline: true }' }
+        '400': { description: Pregunta vacía o > 2.000 caracteres }
+        '504': { description: Tiempo de inferencia agotado }
+    get:
+      summary: Healthcheck del LLM local — RF-8.8
+      security: [{ cookieSesion: [] }]
+      responses:
+        '200': { description: '{ active, provider, model, message }' }
+
+  /api/auth/cambiar-clave:
+    post:
+      summary: Cambiar contraseña — RF-1.4
+      security: [{ cookieSesion: [] }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [actual, nueva], properties: { actual: { type: string }, nueva: { type: string, minLength: 8 } } } } } }
+      responses:
+        '200': { description: '{ ok, redirectTo }' }
+        '400': { description: Contraseña actual incorrecta o nueva inválida }
+
+  /api/admin/usuarios:
+    get: { summary: Lista de usuarios (admin), security: [{ cookieSesion: [] }], responses: { '200': { description: OK } } }
+    post:
+      summary: Crear usuario con contraseña temporal (admin) — RF-1.3
+      security: [{ cookieSesion: [] }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [nombre, email, rol], properties: { nombre: { type: string }, email: { type: string }, rol: { type: string, enum: [encargado, funcionario, admin] }, territorioId: { type: integer }, unidad: { type: string, enum: [DOM, DIDECO] } } } } } }
+      responses: { '201': { description: '{ id, email, claveTemporal }' }, '409': { description: Correo en uso } }
+  /api/admin/usuarios/{id}:
+    patch:
+      summary: Editar rol, territorio, unidad, activo o restablecer contraseña (admin)
+      security: [{ cookieSesion: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: '{ id, claveTemporal | null }' }, '409': { description: El admin no puede bloquearse } }
+  /api/admin/configuracion:
+    get: { summary: Umbrales y parámetros (admin), security: [{ cookieSesion: [] }], responses: { '200': { description: OK } } }
+    patch:
+      summary: '{ umbralMedia, umbralCritica, umbralAlertaRespaldos, visionTimeoutMs } — RF-2.2'
+      security: [{ cookieSesion: [] }]
+      responses: { '200': { description: OK }, '400': { description: Umbrales incoherentes } }
+  /api/admin/categorias/{id}:
+    patch: { summary: 'Editar nombre, radioDuplicadoM, usaIa, color, unidadResponsable, activa (admin)', security: [{ cookieSesion: [] }], responses: { '200': { description: OK } } }
+  /api/admin/territorios:
+    post: { summary: 'Crear territorio { nombre, lat, lng } (admin)', security: [{ cookieSesion: [] }], responses: { '201': { description: OK } } }
+  /api/admin/territorios/{id}:
+    patch: { summary: 'Editar territorio { nombre, lat, lng } (admin)', security: [{ cookieSesion: [] }], responses: { '200': { description: OK } } }
+  /api/admin/vision:
+    get: { summary: Motor activo del servicio de visión (admin) — RF-5.4, security: [{ cookieSesion: [] }], responses: { '200': { description: OK }, '503': { description: Visión no disponible } } }
+    post: { summary: 'Cambiar motor { engine: local|pretrained|ensemble } (admin)', security: [{ cookieSesion: [] }], responses: { '200': { description: OK } } }
+
+  /api/health:
+    get:
+      summary: Estado del servidor y de la base de datos
+      responses:
+        '200': { description: OK }
+        '503': { description: Base de datos sin conexión }

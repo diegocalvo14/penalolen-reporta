@@ -1,0 +1,45 @@
+# Dependencias y builds
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Variables de entorno (nunca a git)
+.env
+.env.*
+!.env.example
+
+# Fotos subidas (PROMPT_DESARROLLO §13: nada de fotos en git)
+uploads/*
+!uploads/.gitkeep
+
+# Pesos de modelos (se copian desde SolucionesBarriales, ver services/vision/weights/README.md)
+*.pt
+*.onnx
+
+# Certificados locales (mkcert)
+infra/certs/*
+!infra/certs/.gitkeep
+!infra/certs/README.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+npm-debug.log*
+
+# Pruebas de punta a punta y certificados que genera next dev --experimental-https
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/certificates/

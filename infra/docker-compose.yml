@@ -1,0 +1,92 @@
+# =====================================================================
+# Peñalolén Reporta — entorno local de demo (PROMPT_DESARROLLO §2 y §9)
+#
+# Desarrollo (la web corre con `npm run dev` en Windows):
+#   docker compose -f infra/docker-compose.yml up -d db vision
+#
+# Demo completa (también la web y las migraciones dentro de Docker):
+#   docker compose -f infra/docker-compose.yml --profile app up -d --build
+#
+# LM Studio / Ollama corren en el equipo anfitrión (fuera de Docker).
+# Variables: infra/.env (copia infra/.env.example).
+# =====================================================================
+name: penalolen-reporta
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-reporta}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-reporta}
+      POSTGRES_DB: ${POSTGRES_DB:-reporta}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-reporta} -d ${POSTGRES_DB:-reporta}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  vision:
+    build: ../services/vision
+    restart: unless-stopped
+    environment:
+      VISION_DEFAULT_ENGINE: ${VISION_DEFAULT_ENGINE:-ensemble}
+      VISION_MODEL_PRETRAINED: ${VISION_MODEL_PRETRAINED:-yolov8s_pothole_pretrained.pt}
+      VISION_MODEL_LOCAL: ${VISION_MODEL_LOCAL:-best_obb_80ep.pt}
+      VISION_API_KEY: ${VISION_API_KEY:-}
+    ports:
+      - "${VISION_PORT:-8000}:8000"
+    volumes:
+      # Los pesos .pt se quedan en tu PC (fuera de git y de la imagen)
+      - ../services/vision/weights:/app/weights:ro
+
+  # Aplica migraciones y carga datos de ejemplo; termina y deja paso a "web"
+  migrate:
+    profiles: ["app"]
+    build:
+      context: ../apps/web
+      target: builder
+    command: ["npm", "run", "db:setup"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-reporta}:${POSTGRES_PASSWORD:-reporta}@db:5432/${POSTGRES_DB:-reporta}
+      SEED_PASSWORD: ${SEED_PASSWORD:-Demo2026!}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    profiles: ["app"]
+    build:
+      context: ../apps/web
+      target: runner
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-reporta}:${POSTGRES_PASSWORD:-reporta}@db:5432/${POSTGRES_DB:-reporta}
+      AUTH_SECRET: ${AUTH_SECRET:?Define AUTH_SECRET en infra/.env}
+      DEMO_MODE: ${DEMO_MODE:-true}
+      COOKIE_SECURE: ${COOKIE_SECURE:-auto}
+      VISION_URL: http://vision:8000
+      VISION_API_KEY: ${VISION_API_KEY:-}
+      LOCAL_LLM_URL: ${LOCAL_LLM_URL:-http://host.docker.internal:1234/v1}
+      OLLAMA_LLM_URL: ${OLLAMA_LLM_URL:-http://host.docker.internal:11434/v1}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_INFERENCE_TIMEOUT_MS: ${LLM_INFERENCE_TIMEOUT_MS:-20000}
+      UPLOAD_DIR: /data/uploads
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    volumes:
+      - ../uploads:/data/uploads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      vision:
+        condition: service_started
+
+volumes:
+  pgdata:
