@@ -17,6 +17,8 @@ const nextConfig: NextConfig = {
   // pg y bcryptjs se ejecutan solo en el servidor (Node.js)
   serverExternalPackages: ['pg', 'bcryptjs', 'sharp'],
   poweredByHeader: false,
+  // Sin el botón "N" de Next en desarrollo (aparecía en las capturas de la demo)
+  devIndicators: false,
 };
 
 export default nextConfig;

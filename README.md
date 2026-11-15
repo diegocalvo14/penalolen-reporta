@@ -81,6 +81,7 @@ Con la app corriendo (`npm run dev`), Docker arriba y LM Studio o el LLM simulad
 
 ```powershell
 npx playwright install chromium   # solo la primera vez
+$env:E2E_IA_REAL="1"              # con YOLO y Llama reales; sin ella espera los simulados
 npm run e2e
 ```
 

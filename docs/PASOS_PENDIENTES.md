@@ -27,6 +27,7 @@ cd apps\web
 npm run dev
 # en otra terminal:
 npx playwright install chromium
+$env:E2E_IA_REAL="1"
 npm run e2e
 ```
 Esto deja las capturas finales en `docs/capturas/`, con el mapa real y la IA real. **Ojo:** con el modelo real, la foto sintética gris de la prueba puede quedar como "Sin detección". Para la demo en vivo usa una foto real de bache.

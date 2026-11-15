@@ -387,7 +387,7 @@ export default function FormularioReporte({ categorias, territorio }: Props) {
                 </div>
                 <p className="line-clamp-2 text-sm text-slate-700">{c.descripcion}</p>
                 <p className="flex items-center gap-1 text-xs text-slate-500">
-                  <Users size={12} /> {c.totalRespaldoVecinos} vecinos · {c.territorio}
+                  <Users size={12} /> {c.totalRespaldoVecinos} {c.totalRespaldoVecinos === 1 ? 'vecino' : 'vecinos'} · {c.territorio}
                 </p>
                 {respaldando?.id !== c.id && (
                   <Button className="w-full" onClick={() => setRespaldando(c)}>

@@ -14,12 +14,13 @@ export const MARCA_PLAZO = '[plazo a definir por la DOM]';
 export function systemPrompt(): string {
   return `Eres el Copiloto de Peñalolén Reporta, asistente para funcionarios municipales de la DOM y la DIDECO de la Municipalidad de Peñalolén (Chile).
 
-Puedes ayudar a:
+Tus tareas son:
 1. Aclarar dudas sobre normativa y sobre el funcionamiento interno de la plataforma, basándote SOLO en el bloque [REFERENCIAS]. Si la respuesta no está allí, dilo explícitamente ("No tengo esa información en mis referencias") y recomienda verificar con la DOM. No inventes artículos, leyes ni procedimientos.
 2. Responder preguntas sobre el trabajo usando SOLO los números del bloque [MÉTRICAS] cuando esté presente. Si los datos no alcanzan para responder, dilo. No inventes cifras.
 3. Redactar borradores: resúmenes de casos y respuestas para el encargado barrial. Todo borrador empieza con "Borrador para revisión del funcionario:".
 
 Reglas obligatorias:
+- Responde siempre con texto normal (prosa o viñetas) dirigido al funcionario. No tienes herramientas ni funciones que llamar: NUNCA respondas con JSON, código ni llamadas a funciones. Toda la información que necesitas ya viene en los bloques de este mensaje.
 - NUNCA menciones plazos de atención, reparación o respuesta (horas, días, semanas ni fechas comprometidas), tampoco en borradores. Si te piden un plazo, escribe exactamente ${MARCA_PLAZO}.
 - No puedes modificar datos: no cambias estados, no cierras ni derivas reportes. Si te lo piden, explica que el funcionario debe hacerlo desde el panel.
 - No incluyas datos personales de vecinos ni de funcionarios.
@@ -39,6 +40,25 @@ export function quitarDatosPersonales(texto: string): string {
     .replace(/\b\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]\b/g, '[RUT omitido]')
     .replace(/(\+?56\s?)?(\(?9\)?[\s-]?)\d{4}[\s-]?\d{4}\b/g, '[teléfono omitido]');
 }
+
+/**
+ * ¿El modelo respondió con una "llamada a función" en vez de texto? Llama 3.1 está
+ * entrenado para usar herramientas y a veces responde {"name": ..., "parameters": ...}
+ * aunque no se le ofrezca ninguna.
+ */
+export function esLlamadaHerramienta(texto: string): boolean {
+  const t = texto
+    .trim()
+    .replace(/^<\|python_tag\|>/, '')
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
+  if (!/^[[{]/.test(t)) return false;
+  return /"(name|function)"\s*:/.test(t) && /"(parameters|arguments)"\s*:/.test(t);
+}
+
+export const PEDIR_TEXTO =
+  'Tu respuesta anterior vino en formato JSON. Responde de nuevo la última pregunta con texto normal en español, dirigido al funcionario, sin JSON ni llamadas a funciones.';
 
 const recorte = (t: string, n: number) => (t.length > n ? `${t.slice(0, n)}…` : t);
 const fecha = (d: Date | string) =>

@@ -39,9 +39,12 @@ Necesitas el repo de la app y el de SolucionesBarriales, porque de ahí salen lo
 
 ```powershell
 cd "$HOME\Proyectos\Ingenieria de Software"     # o la carpeta que usen
-git clone <URL-del-repo-penalolen-reporta> penalolen-reporta
+git clone https://github.com/diegocalvo14/penalolen-reporta.git penalolen-reporta
+cd penalolen-reporta
+git checkout feat/plataforma-integrada   # mientras no esté en main
+cd ..
 # Si no tienen SolucionesBarriales clonado en esta misma carpeta:
-git clone <URL-del-repo-SolucionesBarriales> SolucionesBarriales
+git clone https://github.com/BBLASCHKE1703/SolucionesBarriales.git SolucionesBarriales
 ```
 
 ## 2. Pesos del modelo de visión
@@ -100,9 +103,11 @@ npm run db:setup
 
 ## 6. Copiloto con LM Studio
 
-1. Abre LM Studio y entra a **Discover** (la lupa). Busca `Llama 3.1 8B Instruct` y descarga la versión **Q4_K_M** (unos 5 GB).
-2. Ve a la pestaña **Developer** (ícono `</>`), elige el modelo en el selector de arriba y espera a que cargue.
-3. Activa el servidor con el interruptor **Status: Running** o el botón **Start Server**. Debe quedar en el puerto `1234`. **No actives** *Require authentication*.
+Descarga el **LM Studio** clásico desde <https://lmstudio.ai/download>. **No** descargues *LM Studio Bionic*: es otra app (un agente) y no pueden estar abiertas las dos a la vez. En la pantalla de bienvenida activa **Developer Mode** y deja activado *Start local LLM service on login*.
+
+1. Entra a **Model Search** (la lupa). Busca `Llama 3.1 8B Instruct`, elige `lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF` y descarga la versión **Q4_K_M** (4,9 GB).
+2. Carga el modelo desde la barra de arriba **Select a model to load** (`Ctrl + L`) y espera a que termine.
+3. Entra a **Model Server** en la barra izquierda (en versiones antiguas se llama *Developer*) y prende el servidor (*Status: Running*). Debe quedar en el puerto `1234`. **No actives** *Require authentication*.
 4. Comprueba que responde:
 
    ```powershell
@@ -151,10 +156,20 @@ Resultado esperado: **132 passed**. Las pruebas crean y borran sus propias bases
 
 ```powershell
 npx playwright install chromium     # solo la primera vez
+$env:E2E_IA_REAL="1"
 npm run e2e
 ```
 
-Resultado esperado: **1 passed**. Las capturas quedan en `docs\capturas\`.
+Resultado esperado: **1 passed** (tarda 1 a 3 minutos por el copiloto). Las capturas quedan en `docs\capturas\`.
+
+`E2E_IA_REAL=1` adapta la prueba a la IA real. La foto de la prueba es un rectángulo gris, así que con YOLO real sale "Sin detección", y Llama no responde con frases fijas. En este modo la prueba revisa que llegue el análisis, que el borrador no traiga plazos y que la respuesta use métricas reales. Sin esa variable, la prueba espera el servicio de visión simulado y `npm run llm:simulado`.
+
+Para que las capturas muestren una detección de verdad, descarga una foto de un bache y pásala a la prueba:
+
+```powershell
+$env:E2E_FOTO_BACHE="C:\ruta\a\bache.jpg"
+npm run e2e
+```
 
 **Visión con una foto real.** Entra a <http://localhost:8000/docs>, abre `POST /api/analyze`, pulsa *Try it out*, sube una foto de un bache y pulsa *Execute*. La respuesta debe traer detecciones y una severidad.
 

@@ -100,7 +100,7 @@ export default async function PanelBandeja({ searchParams }: PageProps<'/panel'>
               >
                 <CategoriaPunto color={a.categoria.color} />
                 <span className="font-mono font-semibold text-navy-700">{a.folio}</span>
-                <span className="text-slate-500">{a.totalRespaldoVecinos} vecinos</span>
+                <span className="text-slate-500">{a.totalRespaldoVecinos} {a.totalRespaldoVecinos === 1 ? 'vecino' : 'vecinos'}</span>
                 {a.analisis?.severidad === 'critica' && <SeveridadBadge analisis={a.analisis} />}
               </Link>
             ))}

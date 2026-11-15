@@ -50,7 +50,7 @@ export default function MapaReportesLeaflet({ puntos, centro }: { puntos: PuntoM
                 </Link>
                 <p className="font-medium">{p.categoria.nombre}</p>
                 <p className="text-slate-600">
-                  {ESTADO_LABEL[p.estado]} · {p.totalRespaldoVecinos} vecinos · {p.territorio}
+                  {ESTADO_LABEL[p.estado]} · {p.totalRespaldoVecinos} {p.totalRespaldoVecinos === 1 ? 'vecino' : 'vecinos'} · {p.territorio}
                 </p>
                 {p.severidad && <p className="text-slate-600">Severidad sugerida por IA: {SEVERIDAD_LABEL[p.severidad]}</p>}
               </div>

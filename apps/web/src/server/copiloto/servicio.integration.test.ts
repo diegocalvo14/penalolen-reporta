@@ -10,8 +10,9 @@ import { responderCopiloto } from './servicio';
 
 type Llamada = { url: string; body: { messages: Array<{ role: string; content: string }> } | null };
 
-/** LLM falso: responde /models y /chat/completions con el texto indicado. */
-function llmFalso(respuesta: string, opciones: { colgar?: boolean } = {}) {
+/** LLM falso: responde /models y /chat/completions con el texto indicado (o una lista, en orden). */
+function llmFalso(respuesta: string | string[], opciones: { colgar?: boolean } = {}) {
+  const respuestas = Array.isArray(respuesta) ? [...respuesta] : [respuesta];
   const llamadas: Llamada[] = [];
   const f = (async (url: string, init?: RequestInit) => {
     llamadas.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
@@ -19,7 +20,8 @@ function llmFalso(respuesta: string, opciones: { colgar?: boolean } = {}) {
     if (opciones.colgar) {
       return new Promise((_r, rej) => init?.signal?.addEventListener('abort', () => rej(new Error('abort'))));
     }
-    return new Response(JSON.stringify({ choices: [{ message: { content: respuesta } }] }));
+    const content = respuestas.length > 1 ? respuestas.shift()! : respuestas[0];
+    return new Response(JSON.stringify({ choices: [{ message: { content } }] }));
   }) as unknown as typeof fetch;
   return { f, llamadas };
 }
@@ -55,7 +57,8 @@ describe.skipIf(!integracionHabilitada)('copiloto contra PostGIS', () => {
     expect(r.body).toMatchObject({ success: true, provider: 'lm-studio', model: 'llama-3-8b-instruct', usoContexto: true });
 
     const enviado = llamadas.find((l) => l.url.endsWith('/chat/completions'))!.body!.messages;
-    const contexto = enviado.find((m) => m.content.startsWith('[CONTEXTO DEL REPORTE]'))!.content;
+    expect(enviado.filter((m) => m.role === 'system')).toHaveLength(1); // un solo mensaje de sistema
+    const contexto = enviado[0].content.slice(enviado[0].content.indexOf('[CONTEXTO DEL REPORTE]'));
     expect(contexto).toContain('Folio: PR-');
     expect(contexto).toContain('Respaldo vecinal: 6 vecinos');
     expect(contexto).toContain('En revisión');
@@ -67,9 +70,25 @@ describe.skipIf(!integracionHabilitada)('copiloto contra PostGIS', () => {
     const { f, llamadas } = llmFalso('Hay 1 reporte abierto en La Faena.');
     const r = await responderCopiloto(db, usuario, { messages: [{ role: 'user', content: '¿Cuántos reportes abiertos hay por territorio?' }] }, f);
     expect(r.body).toMatchObject({ success: true, usoMetricas: true });
-    const metricas = llamadas.at(-1)!.body!.messages.find((m) => m.content.startsWith('[MÉTRICAS]'))!.content;
+    const sistema = llamadas.at(-1)!.body!.messages[0].content;
+    const metricas = sistema.slice(sistema.indexOf('[MÉTRICAS]'));
     expect(metricas).toContain('La Faena 1/1');
     expect(metricas).toContain('Totales: 1 reportes');
+  });
+
+  it('si el modelo responde con una llamada a función (JSON), reintenta pidiendo texto', async () => {
+    const json = '{"name": "responder_reporte", "parameters": {"folio": "PR-2026-00001"}}';
+    const { f, llamadas } = llmFalso([json, 'Borrador para revisión del funcionario: el reporte está en revisión.']);
+    const r = await responderCopiloto(db, usuario, { messages: [{ role: 'user', content: 'Redacta una respuesta' }], reporteId }, f);
+    expect(r.body).toMatchObject({ success: true, reply: expect.stringContaining('Borrador para revisión') });
+    const chats = llamadas.filter((l) => l.url.endsWith('/chat/completions'));
+    expect(chats).toHaveLength(2);
+    expect(chats[1].body!.messages.at(-1)!.content).toMatch(/sin JSON/);
+
+    const insistente = llmFalso(json);
+    const r2 = await responderCopiloto(db, usuario, { messages: [{ role: 'user', content: 'Redacta una respuesta' }], reporteId }, insistente.f);
+    expect(r2.status).toBe(502);
+    expect(r2.body).toMatchObject({ success: false, error: expect.stringContaining('formato no válido') });
   });
 
   it('nunca entrega plazos aunque el modelo los escriba', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MARCA_PLAZO, necesitaMetricas, quitarDatosPersonales, sanearPlazos, systemPrompt } from './prompt';
+import { esLlamadaHerramienta, MARCA_PLAZO, necesitaMetricas, quitarDatosPersonales, sanearPlazos, systemPrompt } from './prompt';
 
 describe('sanearPlazos (RF-8.5: el copiloto nunca menciona plazos)', () => {
   it.each([
@@ -49,6 +49,19 @@ describe('necesitaMetricas (RF-8.3)', () => {
   });
 });
 
+describe('esLlamadaHerramienta (Llama 3.1 a veces responde con JSON de función)', () => {
+  it('detecta llamadas a función en JSON, con o sin bloque de código', () => {
+    expect(esLlamadaHerramienta('{"name": "responder_reporte", "parameters": {"folio": "PR-2026-00001", "estado": "En revisión"}}')).toBe(true);
+    expect(esLlamadaHerramienta('```json\n{"name": "obtener_metricas", "parameters": {"filtro": "por_territorio"}}\n```')).toBe(true);
+    expect(esLlamadaHerramienta('<|python_tag|>{"function": "x", "arguments": {}}')).toBe(true);
+  });
+  it('no confunde texto normal', () => {
+    expect(esLlamadaHerramienta('Borrador para revisión del funcionario: el reporte está en revisión.')).toBe(false);
+    expect(esLlamadaHerramienta('Hay 3 reportes abiertos en La Faena {según las métricas}.')).toBe(false);
+    expect(esLlamadaHerramienta('{"total": 3}')).toBe(false);
+  });
+});
+
 describe('systemPrompt', () => {
   it('incluye las referencias y las reglas obligatorias', () => {
     const p = systemPrompt();
@@ -56,5 +69,6 @@ describe('systemPrompt', () => {
     expect(p).toContain('77 bis');
     expect(p).toContain(MARCA_PLAZO);
     expect(p).toMatch(/No puedes modificar datos/);
+    expect(p).toMatch(/NUNCA respondas con JSON/);
   });
 });

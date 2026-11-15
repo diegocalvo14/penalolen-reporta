@@ -17,6 +17,14 @@ import sharp from 'sharp';
 
 const CAPTURAS = process.env.E2E_CAPTURAS ?? path.resolve(__dirname, '../../../docs/capturas');
 const CLAVE = process.env.SEED_PASSWORD ?? 'Demo2026!';
+// E2E_IA_REAL=1: con YOLO y Llama reales. La foto gris sintética no es un bache (sale
+// "Sin detección") y el LLM no responde con frases fijas, así que se revisa lo que sí
+// debe cumplirse: que llegue un análisis, que no haya plazos y que use métricas reales.
+const IA_REAL = Boolean(process.env.E2E_IA_REAL);
+const PLAZO = /\d+\s*(?:a\s*\d+\s*)?(?:horas|hrs|días|dias|semanas)/i;
+const JSON_FUNCION = /"(?:name|parameters|arguments)"\s*:/;
+// E2E_FOTO_BACHE=ruta\a\foto.jpg: usa una foto real de bache (capturas más vistosas con YOLO real)
+const FOTO_BACHE = process.env.E2E_FOTO_BACHE;
 
 // Punto al azar cerca de La Faena: cada ejecución usa un lugar distinto y no choca con datos anteriores
 const P = { latitude: -33.4815 + (Math.random() - 0.5) * 0.003, longitude: -70.579 + (Math.random() - 0.5) * 0.003 };
@@ -25,6 +33,16 @@ const CERCA = { latitude: P.latitude + 0.00004, longitude: P.longitude }; // ≈
 async function foto(color: string) {
   const buffer = await sharp({ create: { width: 800, height: 600, channels: 3, background: color } }).jpeg().toBuffer();
   return { name: 'foto.jpg', mimeType: 'image/jpeg', buffer };
+}
+
+/** Espera a que el mapa muestre teselas (si no hay internet, sigue a los 10 s). */
+async function esperarMapa(page: Page) {
+  await page
+    .waitForFunction(() => Array.from(document.querySelectorAll<HTMLImageElement>('img.leaflet-tile')).some((i) => i.complete && i.naturalWidth > 0), null, {
+      timeout: 10_000,
+    })
+    .catch(() => {});
+  await page.waitForTimeout(500);
 }
 
 async function captura(page: Page, nombre: string) {
@@ -53,7 +71,8 @@ test('guion completo de la demo', async ({ browser }) => {
   await marta.getByRole('link', { name: /Registrar problema/ }).click();
   await marta.getByRole('button', { name: /^Bache/ }).click();
   await expect(marta.getByText(/GPS · precisión ±5 m/)).toBeVisible();
-  await marta.locator('input[type=file]').setInputFiles(await foto('#5a5a5a'));
+  await marta.locator('input[type=file]').setInputFiles(FOTO_BACHE ?? (await foto('#5a5a5a')));
+  await esperarMapa(marta);
   await captura(marta, '02-foto-y-ubicacion');
   await marta.getByRole('button', { name: 'Continuar' }).click();
   await marta.fill('#descripcion', 'Bache profundo frente al paradero, los autos lo esquivan.');
@@ -68,8 +87,11 @@ test('guion completo de la demo', async ({ browser }) => {
   expect(folio).toMatch(/^PR-\d{4}-\d{5}$/);
   await captura(marta, '04-folio');
   await marta.getByRole('link', { name: 'Ver el reporte' }).click();
-  await expect(marta.getByText('Severidad sugerida por IA: Crítica').first()).toBeVisible({ timeout: 30_000 });
+  await expect(marta.getByText(IA_REAL ? /Severidad sugerida por IA:/ : 'Severidad sugerida por IA: Crítica').first()).toBeVisible({
+    timeout: IA_REAL ? 60_000 : 30_000,
+  });
   const reporteId = marta.url().split('/').pop()!;
+  await esperarMapa(marta);
   await captura(marta, '05-severidad-ia');
 
   // ---------------------------------------------------------------- 3. Otro encargado suma respaldo (6 + 3 = 9)
@@ -95,9 +117,11 @@ test('guion completo de la demo', async ({ browser }) => {
   await marta.getByRole('button', { name: /Luminaria en falla/ }).click();
   await expect(marta.getByText(/GPS · precisión/)).toBeVisible();
   await marta.getByRole('button', { name: 'Continuar' }).click();
-  if (await marta.getByText('Ya existe un reporte cerca').isVisible().catch(() => false)) {
-    await marta.getByRole('button', { name: /Es otro problema/ }).click();
-  }
+  // Si quedaron luminarias cerca de corridas anteriores aparece el aviso de duplicado:
+  // se espera a que la app termine de buscar (aviso o paso siguiente) antes de decidir.
+  const avisoCerca = marta.getByText('Ya existe un reporte cerca');
+  await expect(marta.locator('#descripcion').or(avisoCerca)).toBeVisible();
+  if (await avisoCerca.isVisible()) await marta.getByRole('button', { name: /Es otro problema/ }).click();
   await marta.fill('#descripcion', 'Luminaria apagada hace una semana en el pasaje.');
   await marta.getByRole('button', { name: 'Junta de vecinos' }).click();
   await marta.getByRole('button', { name: 'Enviar reporte' }).click();
@@ -112,6 +136,7 @@ test('guion completo de la demo', async ({ browser }) => {
   await captura(dom, '08-bandeja-por-respaldos');
   await dom.goto('/panel/mapa');
   await expect(dom.locator('.leaflet-interactive').nth(1)).toBeAttached();
+  await esperarMapa(dom);
   await captura(dom, '09-mapa');
   await dom.goto(`/panel/reportes/${reporteId}`);
   await expect(dom.getByText('Análisis de la foto')).toBeVisible();
@@ -120,14 +145,28 @@ test('guion completo de la demo', async ({ browser }) => {
   // ---------------------------------------------------------------- 6. Copiloto
   await dom.getByRole('link', { name: 'Consultar al copiloto' }).click();
   await expect(dom.getByText(/IA local activa/)).toBeVisible();
+  const respuestas = dom.locator('.bg-slate-100 > p.whitespace-pre-wrap'); // burbujas del asistente
+  const antes = await respuestas.count();
   await dom.getByRole('button', { name: 'Redactar respuesta para el encargado' }).click();
-  const borrador = dom.locator('p.whitespace-pre-wrap').filter({ hasText: 'Borrador para revisión del funcionario' });
-  await expect(borrador).toBeVisible({ timeout: 60_000 });
-  await expect(borrador).toContainText('[plazo a definir por la DOM]');
-  await expect(borrador).not.toContainText('48 horas');
+  if (IA_REAL) {
+    await expect(respuestas).toHaveCount(antes + 1, { timeout: 120_000 });
+    await expect(respuestas.last()).not.toContainText(PLAZO);
+    await expect(respuestas.last()).not.toContainText(JSON_FUNCION);
+  } else {
+    const borrador = dom.locator('p.whitespace-pre-wrap').filter({ hasText: 'Borrador para revisión del funcionario' });
+    await expect(borrador).toBeVisible({ timeout: 60_000 });
+    await expect(borrador).toContainText('[plazo a definir por la DOM]');
+    await expect(borrador).not.toContainText('48 horas');
+  }
   await dom.getByPlaceholder(/Escribe tu pregunta/).fill('¿Cuántos reportes abiertos hay por territorio?');
   await dom.keyboard.press('Enter');
-  await expect(dom.locator('p.whitespace-pre-wrap').filter({ hasText: /abiertos por territorio/ })).toBeVisible({ timeout: 60_000 });
+  if (IA_REAL) {
+    await expect(respuestas).toHaveCount(antes + 2, { timeout: 120_000 });
+    await expect(respuestas.last()).not.toContainText(JSON_FUNCION);
+    await expect(dom.getByText(/métricas reales/).last()).toBeVisible();
+  } else {
+    await expect(dom.locator('p.whitespace-pre-wrap').filter({ hasText: /abiertos por territorio/ })).toBeVisible({ timeout: 60_000 });
+  }
   await captura(dom, '11-copiloto');
 
   // ---------------------------------------------------------------- 7. En revisión → En gestión → Resuelto con foto

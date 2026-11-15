@@ -9,7 +9,7 @@ import type { Unidad } from '@/db/schema';
 import { calcularMetricas, inicioDeMes } from '@/server/metricas';
 import { obtenerDetalle } from '@/server/reportes/consultas';
 import { detectarProveedor, inferir, LlmError, type MensajeChat } from './llm';
-import { bloqueMetricas, contextoReporte, necesitaMetricas, sanearPlazos, systemPrompt } from './prompt';
+import { bloqueMetricas, contextoReporte, esLlamadaHerramienta, necesitaMetricas, PEDIR_TEXTO, sanearPlazos, systemPrompt } from './prompt';
 
 export const MAX_PREGUNTA = 2000;
 
@@ -56,13 +56,15 @@ export async function responderCopiloto(
     };
   }
 
-  const sistema: MensajeChat[] = [{ role: 'system', content: systemPrompt() }];
+  // Un solo mensaje de sistema: varias plantillas de chat (Llama 3 en LM Studio entre
+  // ellas) manejan mal más de un mensaje "system".
+  const bloques: string[] = [systemPrompt()];
 
   let usoContexto = false;
   if (solicitud.reporteId) {
     const detalle = await obtenerDetalle(db, solicitud.reporteId);
     if (!detalle) return { status: 404, body: { success: false, error: 'El reporte no existe.' } };
-    sistema.push({ role: 'system', content: contextoReporte(detalle) });
+    bloques.push(contextoReporte(detalle));
     usoContexto = true;
   }
 
@@ -75,7 +77,7 @@ export async function responderCopiloto(
       calcularMetricas(db, { ...filtros, desde: inicioDeMes() }),
     ]);
     const ambito = porUnidad ? `categorías de la unidad ${usuario.unidad}` : 'toda la comuna, todas las categorías';
-    sistema.push({ role: 'system', content: bloqueMetricas(general, mes, ambito) });
+    bloques.push(bloqueMetricas(general, mes, ambito));
   }
 
   // Historial reciente de la conversación (los mensajes largos del asistente se recortan)
@@ -84,8 +86,18 @@ export async function responderCopiloto(
     content: m.content.length > 3000 ? `${m.content.slice(0, 3000)}…` : m.content,
   }));
 
+  const sistema: MensajeChat = { role: 'system', content: bloques.join('\n\n') };
+
   try {
-    const bruto = await inferir(proveedor, [...sistema, ...historial], f);
+    const mensajes: MensajeChat[] = [sistema, ...historial];
+    let bruto = await inferir(proveedor, mensajes, f);
+    if (esLlamadaHerramienta(bruto)) {
+      // Un reintento pidiendo texto; si insiste en JSON, se informa en vez de mostrarlo
+      bruto = await inferir(proveedor, [...mensajes, { role: 'user', content: PEDIR_TEXTO }], f);
+      if (esLlamadaHerramienta(bruto)) {
+        return { status: 502, body: { success: false, error: 'El modelo respondió en un formato no válido (JSON). Intenta de nuevo o reformula la pregunta.' } };
+      }
+    }
     const { texto, reemplazos } = sanearPlazos(bruto.trim() || 'El modelo no devolvió contenido. Intenta reformular la pregunta.');
     return {
       status: 200,
