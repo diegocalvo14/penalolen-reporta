@@ -40,9 +40,6 @@ Necesitas el repo de la app y el de SolucionesBarriales, porque de ahí salen lo
 ```powershell
 cd "$HOME\Proyectos\Ingenieria de Software"     # o la carpeta que usen
 git clone https://github.com/diegocalvo14/penalolen-reporta.git penalolen-reporta
-cd penalolen-reporta
-git checkout feat/plataforma-integrada   # mientras no esté en main
-cd ..
 # Si no tienen SolucionesBarriales clonado en esta misma carpeta:
 git clone https://github.com/BBLASCHKE1703/SolucionesBarriales.git SolucionesBarriales
 ```
